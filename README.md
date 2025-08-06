@@ -35,43 +35,37 @@ The patch:
    - Waits for the specified delay period
    - Recursively calls itself to retry the task execution
 3. If retries are exhausted:
-   - Emits a TaskCompletedEvent with a failure status instead of re-raising the exception
+   - Returns a TaskOutput describing the failure instead of re-raising the exception
    - Allows the workflow to continue with subsequent tasks
 
 ## Usage
 
 ### Installation
 
-1. Place the `main.py` file in your project
-2. Import it at the beginning of your CrewAI workflow:
-
-```python
-import main  # This automatically applies the patch when imported
-```
+Place the `task.py` file in the src directory of crewai
 
 ### Configuration
 
 You can configure the retry behavior by defining max_retries and delay parameters in the _execute_core method:
 
 ```python
-from crewai import Task
-
-# Define max_retries and delay parameters in the _execute_core method
-def _execute_core(
-        self,
-        agent: Optional[BaseAgent],
-        context: Optional[str],
-        tools: Optional[List[Any]],
-        max_retries: Optional[int] = 5,
-        delay: Optional[int] = 5,
-    ) -> TaskOutput:
+@task
+def analyze_log_task(self) -> Task:
+    return Task(
+        description="Description",
+        expected_output="Output",
+        agent=agent(),
+        async_execution=True,
+        max_retries_after_failure=5,
+        max_delay_after_failure=2
+    )
 ```
 
 ### Default Values
 
 If not specified:
-- `max_retries` defaults to 5 attempts
-- `delay` defaults to 5 seconds between retries
+- `max_retries_after_failure` defaults to 5 attempts
+- `max_delay_after_failure` defaults to 5 seconds
 
 ## Benefits
 
