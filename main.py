@@ -17,8 +17,6 @@ def _execute_core(
         agent: Optional[BaseAgent],
         context: Optional[str],
         tools: Optional[List[Any]],
-        max_retries: Optional[int] = 5,
-        delay: Optional[int] = 5,
     ) -> TaskOutput:
         """Run the core execution logic of the task."""
         try:
@@ -77,7 +75,7 @@ def _execute_core(
                         content=f"Guardrail blocked, retrying, due to: {guardrail_result.error}\n",
                         color="yellow",
                     )
-                    return self._execute_core(agent, context, tools, max_retries, delay)
+                    return self._execute_core(agent, context, tools)
 
                 if guardrail_result.result is None:
                     raise Exception(
@@ -120,13 +118,40 @@ def _execute_core(
         except Exception as e:
             self.end_time = datetime.datetime.now()
             crewai_event_bus.emit(self, TaskFailedEvent(error=str(e), task=self))
-            if max_retries > 0:
-                # Retry task execution
-                time.sleep(delay)
-                max_retries -= 1
-                return self._execute_core(agent, context, tools, max_retries, delay)
+            if self.number_of_retries_remaining_after_failure > 0:
+                # Retrying Task execution after failure using non-blocking timer
+                self.number_of_retries_remaining_after_failure -= 1
+                
+                # Create a Future to hold the result of the delayed execution
+                result_future = Future()
+                
+                def delayed_retry():
+                    try:
+                        # Execute the retry and set the result in the future
+                        retry_result = self._execute_core(agent, context, tools)
+                        result_future.set_result(retry_result)
+                    except Exception as retry_error:
+                        result_future.set_exception(retry_error)
+                
+                # Schedule the retry without blocking
+                timer = threading.Timer(self.max_delay_after_failure, delayed_retry)
+                timer.daemon = True  # Allow the timer to be terminated when the main thread exits
+                timer.start()
+                
+                # Wait for the result - this will block the current thread but allows other threads to run
+                return result_future.result()
             else:
-                crewai_event_bus.emit(self, TaskCompletedEvent(output=TaskOutput(description="Task failed", agent=self.agent.role), task=self))
-                #raise e  # Re-raise the exception after emitting the event
+                # Instead of raising an exception which could block the thread and cause the crew to hang,
+                # return a TaskOutput that indicates failure but allows the process to continue
+                error_output = TaskOutput(
+                    name=self.name,
+                    description=self.description,
+                    expected_output=self.expected_output,
+                    raw=f"Task failed after {self.max_retries_after_failure} retries. Error: {str(e)}",
+                    agent=self.agent.role if self.agent else None,
+                    output_format=self._get_output_format(),
+                )
+                self.output = error_output
+                return error_output
 
 Task._execute_core = _execute_core
